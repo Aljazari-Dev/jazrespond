@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% set active='overview' %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Overview</h1>
+    <p>Promobot backend summary and control center status.</p>
+  </div>
+</section>
+
+<section class="hero-panel">
+  <div class="hero-mark">Aljazari</div>
+  <div class="hero-text">
+    <h2>Aljazari</h2>
+    <p>for Robotics and AI Solutions</p>
+  </div>
+</section>
+
+<section class="summary-grid">
+  <div class="summary-box"><span>Commands</span><strong>{{ commands|length }}</strong></div>
+  <div class="summary-box"><span>Remote Queue</span><strong>{{ queue_count }}</strong></div>
+  <div class="summary-box"><span>Audio Cache</span><strong>{{ audio_count }}</strong></div>
+  <div class="summary-box"><span>Server</span><strong class="success">Online</strong></div>
+</section>
+
+<section class="panel table-panel">
+  <div class="panel-head">
+    <h2>Command Types</h2>
+  </div>
+  <table class="data-table compact-table">
+    <thead><tr><th>Type</th><th>Total</th></tr></thead>
+    <tbody>
+      {% for key, value in by_type.items() %}
+      <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
+      {% endfor %}
+      {% if not by_type %}<tr><td colspan="2" class="empty">No commands yet.</td></tr>{% endif %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

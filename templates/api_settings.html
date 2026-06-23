@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% set active='api_settings' %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>API Settings</h1>
+    <p>GPT, ElevenLabs, and audio response settings.</p>
+  </div>
+  <button class="btn primary" onclick="saveSettings()">Save Settings</button>
+</section>
+
+<section class="panel settings-panel">
+  <div class="tabs" data-tabs="api-settings-tabs">
+    <button class="tab-btn active" data-tab="gpt">GPT Settings</button>
+    <button class="tab-btn" data-tab="elevenlabs">ElevenLabs Settings</button>
+    <button class="tab-btn" data-tab="audio">Audio Response Settings</button>
+  </div>
+
+  <form id="settingsForm" class="form-body">
+    <div class="tab-pane active" id="tab-gpt">
+      <div class="form-grid two">
+        <label>OpenAI API Key
+          <div class="secret-row"><input type="password" name="openai_api_key" value="{{ config.openai_api_key }}"><button type="button" class="btn small" data-toggle-secret>Show</button></div>
+        </label>
+        <label>Model
+          <input name="model" value="{{ config.model }}">
+        </label>
+        <label>Quick Max Output Tokens
+          <input type="number" name="quick_max_output_tokens" value="{{ config.quick_max_output_tokens }}">
+        </label>
+        <label>Detail Max Output Tokens
+          <input type="number" name="detail_max_output_tokens" value="{{ config.detail_max_output_tokens }}">
+        </label>
+      </div>
+      <button type="button" class="btn" onclick="testHealth()">Test Connection</button>
+    </div>
+
+    <div class="tab-pane" id="tab-elevenlabs">
+      <div class="form-grid two">
+        <label>ElevenLabs API Key
+          <div class="secret-row"><input type="password" name="elevenlabs_api_key" value="{{ config.elevenlabs_api_key }}"><button type="button" class="btn small" data-toggle-secret>Show</button></div>
+        </label>
+        <label>Arabic Voice ID
+          <input name="elevenlabs_voice_id_ar" value="{{ config.elevenlabs_voice_id_ar }}">
+        </label>
+        <label>ElevenLabs Model
+          <input name="elevenlabs_model_ar" value="{{ config.elevenlabs_model_ar }}">
+        </label>
+        <label class="checkline"><input type="checkbox" name="use_elevenlabs_for_arabic" {% if config.use_elevenlabs_for_arabic %}checked{% endif %}> ElevenLabs Arabic voice enabled</label>
+      </div>
+      <button type="button" class="btn" onclick="testHealth()">Test Connection</button>
+    </div>
+
+    <div class="tab-pane" id="tab-audio">
+      <div class="form-grid three">
+        <label>TTS Chunk Max Chars
+          <input type="number" name="tts_chunk_max_chars" value="{{ config.tts_chunk_max_chars }}">
+        </label>
+        <label>Max Detail Parts
+          <input type="number" name="max_detail_parts" value="{{ config.max_detail_parts }}">
+        </label>
+        <label>Audio Wait Timeout Sec
+          <input type="number" name="audio_wait_timeout_sec" value="{{ config.audio_wait_timeout_sec }}">
+        </label>
+      </div>
+    </div>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script>{% endblock %}

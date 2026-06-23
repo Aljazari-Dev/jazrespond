@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or 'Promobot AI Control Center' }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">P</div>
+      <div>
+        <div class="brand-title">Promobot AI Control Center</div>
+        <div class="brand-subtitle">Robot Operations Dashboard</div>
+      </div>
+    </div>
+    <div class="top-status">
+      <span class="status-pill"><span class="dot ok"></span>Server</span>
+      <span class="status-pill"><span class="dot warn"></span>Robot</span>
+      <button class="btn compact" onclick="window.location.reload()">Refresh</button>
+    </div>
+  </header>
+
+  <aside class="sidebar">
+    <nav class="side-nav">
+      <a href="{{ url_for('dashboard') }}" class="side-link {% if active=='overview' %}active{% endif %}">Overview</a>
+      <a href="{{ url_for('api_settings') }}" class="side-link {% if active=='api_settings' %}active{% endif %}">API Settings</a>
+      <a href="{{ url_for('system_prompt_page') }}" class="side-link {% if active=='system_prompt' %}active{% endif %}">System Prompt</a>
+      <a href="{{ url_for('commands_page') }}" class="side-link {% if active=='commands' %}active{% endif %}">Promobot Commands</a>
+      <a href="{{ url_for('usage_page') }}" class="side-link {% if active=='usage' %}active{% endif %}">Usage</a>
+      <a href="{{ url_for('logs_page') }}" class="side-link {% if active=='logs' %}active{% endif %}">Logs</a>
+    </nav>
+  </aside>
+
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <div id="toast" class="toast"></div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

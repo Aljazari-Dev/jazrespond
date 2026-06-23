@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% set active='logs' %}
+{% block content %}
+<section class="page-head"><div><h1>Logs</h1><p>Recent backend events.</p></div><button class="btn" onclick="loadLogs()">Refresh</button></section>
+<section class="panel"><table class="data-table compact-table"><thead><tr><th>Time</th><th>Type</th><th>Message</th></tr></thead><tbody id="logsBody"></tbody></table></section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script><script>loadLogs()</script>{% endblock %}

@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: promobot-jaz-backend
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --worker-class gthread --timeout 120 app:app
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATA_DIR
+        value: /var/data
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: ELEVENLABS_MODEL_AR
+        value: eleven_flash_v2_5
+      - key: ELEVENLABS_VOICE_ID_AR
+        value: 9FHjCdVXgA4tYxIYHTcZ
+      - key: ENABLE_ELEVENLABS_STREAMING
+        value: true
+      - key: ROBOT_AI_STREAMING_ENABLED
+        value: true
+      - key: ROBOT_STRICT_LANGUAGE_LOCK
+        value: true
+      - key: FLASK_SECRET_KEY
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+    disk:
+      name: promobot-data
+      mountPath: /var/data
+      sizeGB: 1

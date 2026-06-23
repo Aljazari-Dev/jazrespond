@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% set active='system_prompt' %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>System Prompt</h1>
+    <p>Robot response behavior and answer structure.</p>
+  </div>
+  <div class="head-actions">
+    <button class="btn" onclick="resetPromptForm()">Reset</button>
+    <button class="btn primary" onclick="savePrompt()">Save Prompt</button>
+  </div>
+</section>
+
+<section class="panel prompt-panel">
+  <form id="promptForm" class="form-body">
+    <label>System Prompt
+      <textarea name="system_prompt" class="large-textarea">{{ config.system_prompt }}</textarea>
+    </label>
+    <label>Quick Answer Prompt
+      <textarea name="quick_answer_prompt" class="large-textarea mid">{{ config.quick_answer_prompt }}</textarea>
+    </label>
+    <label>Detail Answer Prompt
+      <textarea name="detail_answer_prompt" class="large-textarea mid">{{ config.detail_answer_prompt }}</textarea>
+    </label>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script>{% endblock %}

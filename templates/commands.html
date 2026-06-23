@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% set active='commands' %}
+{% block content %}
+<section class="page-head command-head">
+  <div>
+    <h1>Promobot Commands</h1>
+    <p>Manage voice and remote actions by type.</p>
+  </div>
+  <div class="head-actions">
+    <input id="robotId" class="robot-input" value="promobot_v4_0445">
+    <button class="btn" onclick="loadCommands()">Refresh</button>
+  </div>
+</section>
+
+<section class="panel commands-panel">
+  <div class="command-tabs" id="commandTabs">
+    <button class="cmd-tab active" data-type="ros_script">ROS Scripts</button>
+    <button class="cmd-tab" data-type="start_app">Applications</button>
+    <button class="cmd-tab" data-type="promobot_tts">Promobot TTS</button>
+    <button class="cmd-tab" data-type="set_language">Language</button>
+    <button class="cmd-tab" data-type="mute">Mute</button>
+    <button class="cmd-tab" data-type="media">Media Dialogs</button>
+    <button class="cmd-tab" data-type="face_greeting">Face Greetings</button>
+    <button class="cmd-tab" data-type="shell_command">Shell Commands</button>
+    <button class="cmd-tab" data-type="multi_action">Multi Actions</button>
+    <button class="cmd-tab" data-type="none">None / Blocked</button>
+  </div>
+
+  <div class="command-toolbar">
+    <div>
+      <h2 id="activeTypeTitle">ROS Scripts</h2>
+      <span id="activeTypeCount" class="muted">0 commands</span>
+    </div>
+    <div class="toolbar-actions">
+      <input id="commandSearch" class="search-input" placeholder="Search commands">
+      <button class="btn primary" onclick="openCommandDrawer()">Add New</button>
+    </div>
+  </div>
+
+  <table class="data-table" id="commandsTable">
+    <thead>
+      <tr>
+        <th>ID</th><th>Name</th><th>Trigger</th><th>Language</th><th>Phrases</th><th>Action Value</th><th>Priority</th><th>Status</th><th>Controls</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<div class="drawer-backdrop" id="drawerBackdrop" onclick="closeCommandDrawer()"></div>
+<aside class="drawer" id="commandDrawer">
+  <div class="drawer-head">
+    <div>
+      <h2 id="drawerTitle">Add Command</h2>
+      <span id="drawerSubtitle" class="muted">ROS Script</span>
+    </div>
+    <button class="icon-btn" onclick="closeCommandDrawer()">×</button>
+  </div>
+  <form id="commandForm" class="drawer-body">
+    <input type="hidden" name="id" id="cmdId">
+    <input type="hidden" name="action_type" id="cmdActionType">
+
+    <div id="drawerDynamicFields"></div>
+  </form>
+  <div class="drawer-foot">
+    <button class="btn" onclick="closeCommandDrawer()">Cancel</button>
+    <button class="btn primary" onclick="saveCommand()">Save</button>
+  </div>
+</aside>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script>{% endblock %}

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% set active='usage' %}
+{% block content %}
+<section class="page-head"><div><h1>Usage</h1><p>Current local server counters.</p></div></section>
+<section class="panel"><table class="data-table compact-table"><tbody id="usageBody"><tr><td>Loading</td><td></td></tr></tbody></table></section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script><script>loadUsage()</script>{% endblock %}
