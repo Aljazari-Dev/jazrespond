@@ -33,6 +33,63 @@ ACTIVE_CONFIG_PATH = DATA_DIR / "active_config.json"
 ACTIVE_COMMANDS_PATH = DATA_DIR / "active_commands.json"
 ACTIVE_FACE_GREETINGS_PATH = DATA_DIR / "active_face_greetings.json"
 
+# Optional GitHub-to-Render seed import.
+# Put JSON files in repo folder: seed_data/
+# On Render, set:
+#   IMPORT_SEED_JSON=true
+#   SEED_JSON_OVERWRITE=true
+# The files will be copied into DATA_DIR, usually /var/data.
+SEED_DATA_DIR = BASE_DIR / "seed_data"
+
+
+def import_seed_json_if_requested():
+    """Import command/face JSON files from seed_data into DATA_DIR.
+
+    This is useful when Render Web Shell paste is not working.
+    It intentionally ignores config.json and active_config.json so API keys
+    stay in Render Environment Variables, not GitHub.
+    """
+    import_enabled = os.getenv("IMPORT_SEED_JSON", "false").strip().lower() in {"1", "true", "yes", "on"}
+    overwrite = os.getenv("SEED_JSON_OVERWRITE", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+    if not import_enabled:
+        return
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    allowed_files = [
+        "commands.json",
+        "face_greetings.json",
+        "active_commands.json",
+        "active_face_greetings.json",
+    ]
+
+    for filename in allowed_files:
+        src = SEED_DATA_DIR / filename
+        dst = DATA_DIR / filename
+
+        if not src.exists():
+            print(f"[seed] skipped missing file: {src}", flush=True)
+            continue
+
+        if dst.exists() and not overwrite:
+            print(f"[seed] skipped existing file: {dst}", flush=True)
+            continue
+
+        try:
+            with open(src, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            with open(dst, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+            print(f"[seed] imported {filename} to {dst}", flush=True)
+        except Exception as e:
+            print(f"[seed] failed to import {filename}: {e}", flush=True)
+
+
+import_seed_json_if_requested()
+
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "promobot-local-dev-key-change-me")
@@ -357,16 +414,15 @@ def load_active_config():
             data = json.load(f)
         config = DEFAULT_CONFIG.copy()
         config.update(data)
-        return config
+        return apply_env_overrides(config)
     except Exception:
         config = load_config()
         save_active_config(config)
-        return config
+        return apply_env_overrides(config)
 
 
 def save_active_config(config):
-    safe_config = DEFAULT_CONFIG.copy()
-    safe_config.update(config)
+    safe_config = strip_env_managed_secrets_for_save(config)
     ACTIVE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(ACTIVE_CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(safe_config, f, ensure_ascii=False, indent=2)
