@@ -322,6 +322,7 @@ PUBLIC_PATH_PREFIXES = (
     "/api/remote/next",
     "/api/face-greetings/match",
     "/api/robot/runtime-config",
+    "/api/robot/gemini-config",
     "/api/robot/sync/apply",
     "/api/audio/live/",
     "/audio/",
@@ -1398,6 +1399,43 @@ def api_face_greetings_match():
         })
     log_event("face", "Face greeting matched", {"robot_id": robot_id, "username": username, "recognition_type": recognition_type, "greeting": match.get("person_name")})
     return jsonify({"ok": True, "matched": True, "robot_id": robot_id, "username": username, "track_id": track_id, "recognition_type": recognition_type, "greeting": public_face_greeting(match)})
+
+
+@app.route("/api/robot/gemini-config", methods=["GET"])
+def api_robot_gemini_config():
+    """
+    Robot-only Gemini Live configuration endpoint.
+
+    Render environment variable required:
+        ROBOT_CONFIG_TOKEN=<long-random-secret>
+
+    Request header required:
+        X-Robot-Token: <same-secret>
+    """
+    expected = os.getenv("ROBOT_CONFIG_TOKEN", "").strip()
+    provided = request.headers.get("X-Robot-Token", "").strip()
+
+    if not expected:
+        return jsonify({
+            "ok": False,
+            "error": "ROBOT_CONFIG_TOKEN is not configured"
+        }), 503
+
+    if not provided or not compare_digest(provided, expected):
+        return jsonify({
+            "ok": False,
+            "error": "Unauthorized"
+        }), 401
+
+    # Read the editable dashboard configuration directly.
+    # This makes /system-prompt changes available to Gemini on the next session.
+    config = load_config()
+
+    return jsonify({
+        "ok": True,
+        "system_prompt": config.get("system_prompt", ""),
+        "knowledge_base": config.get("knowledge_base", "")
+    })
 
 
 @app.route("/api/robot/runtime-config", methods=["GET"])
