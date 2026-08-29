@@ -161,6 +161,48 @@ DEFAULT_COMMANDS = [
         "action_value": "dance1",
         "reply_text": "أكيد.",
         "notes": ""
+    },
+    {
+        "id": 5,
+        "enabled": True,
+        "name": "Handshake Kurdish",
+        "trigger_mode": "voice_remote",
+        "language": "ku",
+        "phrases": ["دەست بدە", "دەستم بگرە", "دەست"],
+        "match_type": "contains",
+        "priority": 100,
+        "action_type": "ros_script",
+        "action_value": "get_hand_boy",
+        "reply_text": "بەدڵنیایی، فەرموو.",
+        "notes": "Sorani Kurdish / Erbil"
+    },
+    {
+        "id": 6,
+        "enabled": True,
+        "name": "Take Photo Kurdish",
+        "trigger_mode": "voice_remote",
+        "language": "ku",
+        "phrases": ["وێنەم بگرە", "وێنە بگرە", "کامێرا بکەرەوە"],
+        "match_type": "contains",
+        "priority": 95,
+        "action_type": "start_app",
+        "action_value": "promobot_example_app_camerae999999",
+        "reply_text": "باشە، کامێرا دەکەمەوە.",
+        "notes": "Sorani Kurdish / Erbil"
+    },
+    {
+        "id": 7,
+        "enabled": True,
+        "name": "Dance Kurdish",
+        "trigger_mode": "voice_remote",
+        "language": "ku",
+        "phrases": ["هەڵپەڕە", "هەڵپەڕکێ بکە", "سەما بکە"],
+        "match_type": "contains",
+        "priority": 80,
+        "action_type": "ros_script",
+        "action_value": "dance1",
+        "reply_text": "بەدڵنیایی.",
+        "notes": "Sorani Kurdish / Erbil"
     }
 ]
 
@@ -475,9 +517,51 @@ def save_active_face_greetings(items):
         json.dump(items, f, ensure_ascii=False, indent=2)
 
 
+def ensure_kurdish_seed_commands(commands):
+    """Non-destructive migration for existing Render persistent data.
+
+    Existing robots already have commands.json, so changing DEFAULT_COMMANDS alone
+    would not add Kurdish commands. On Sync, add the starter KU commands only when
+    the installation currently has no Kurdish commands at all.
+    """
+    commands = list(commands or [])
+
+    has_kurdish = any(
+        normalize_language(c.get("language", "")) == "ku"
+        for c in commands
+        if isinstance(c, dict)
+    )
+    if has_kurdish:
+        return commands, False
+
+    kurdish_defaults = [
+        dict(c) for c in DEFAULT_COMMANDS
+        if normalize_language(c.get("language", "")) == "ku"
+    ]
+
+    if not kurdish_defaults:
+        return commands, False
+
+    next_id = next_command_id(commands)
+
+    for item in kurdish_defaults:
+        item["id"] = next_id
+        next_id += 1
+        commands.append(public_command(item))
+
+    save_commands(commands)
+    log_event(
+        "commands",
+        "Starter Kurdish commands added",
+        {"count": len(kurdish_defaults)}
+    )
+    return commands, True
+
+
 def apply_robot_sync_snapshot():
     config = load_config()
     commands = load_commands()
+    commands, _ = ensure_kurdish_seed_commands(commands)
     face_greetings = load_face_greetings()
     save_active_config(config)
     save_active_commands(commands)
@@ -637,7 +721,18 @@ def find_matching_face_greeting(username: str, language: str, recognition_type: 
     matches = [x for x in items if face_greeting_matches(x, username, language, recognition_type)]
     if not matches:
         return None
-    matches.sort(key=lambda x: int(x.get("priority", 0)), reverse=True)
+
+    req_lang = normalize_language(language)
+
+    # Prefer a greeting explicitly configured for the current language over
+    # a generic "all" greeting, then apply the normal priority ordering.
+    matches.sort(
+        key=lambda x: (
+            1 if (x.get("language") or "").strip().lower() == req_lang else 0,
+            int(x.get("priority", 0))
+        ),
+        reverse=True
+    )
     return matches[0]
 
 def next_command_id(commands):
@@ -713,7 +808,18 @@ def find_matching_command(text, language):
     matches = [c for c in commands if command_matches(c, text, language)]
     if not matches:
         return None
-    matches.sort(key=lambda c: int(c.get("priority", 0)), reverse=True)
+
+    req_lang = normalize_language(language)
+
+    # A language-specific command should win over an "all" command when both
+    # match the same utterance. Priority is then used inside that group.
+    matches.sort(
+        key=lambda c: (
+            1 if (c.get("language") or "").strip().lower() == req_lang else 0,
+            int(c.get("priority", 0))
+        ),
+        reverse=True
+    )
     return matches[0]
 
 
@@ -1411,6 +1517,11 @@ def api_robot_gemini_config():
 
     Request header required:
         X-Robot-Token: <same-secret>
+
+    IMPORTANT:
+    Gemini reads the ACTIVE snapshot, not unsynced dashboard drafts.
+    Therefore the existing "Sync server changes to robot" button remains the
+    single apply point for Prompt / Knowledge Base / Commands / Face Greetings.
     """
     expected = os.getenv("ROBOT_CONFIG_TOKEN", "").strip()
     provided = request.headers.get("X-Robot-Token", "").strip()
@@ -1427,14 +1538,25 @@ def api_robot_gemini_config():
             "error": "Unauthorized"
         }), 401
 
-    # Read the editable dashboard configuration directly.
-    # This makes /system-prompt changes available to Gemini on the next session.
-    config = load_config()
+    config = load_active_config()
+    commands = [public_command(c) for c in load_active_commands()]
+    face_greetings = [public_face_greeting(x) for x in load_active_face_greetings()]
 
     return jsonify({
         "ok": True,
         "system_prompt": config.get("system_prompt", ""),
-        "knowledge_base": config.get("knowledge_base", "")
+        "quick_answer_prompt": config.get("quick_answer_prompt", ""),
+        "detail_answer_prompt": config.get("detail_answer_prompt", ""),
+        "knowledge_base": config.get("knowledge_base", ""),
+        "supported_languages": ["ar", "en", "ku"],
+        "routing": {
+            "commands_match_endpoint": "/api/commands/match",
+            "face_greetings_match_endpoint": "/api/face-greetings/match"
+        },
+        "counts": {
+            "commands": len(commands),
+            "face_greetings": len(face_greetings)
+        }
     })
 
 
@@ -1464,6 +1586,18 @@ def api_robot_sync_apply():
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"ok": True, "server": "online", "robot": "unknown", "message": "Promobot backend is running"})
+
+
+@app.route("/api/languages", methods=["GET"])
+def api_languages():
+    return jsonify({
+        "ok": True,
+        "languages": [
+            {"code": "ar", "label": "Arabic"},
+            {"code": "en", "label": "English"},
+            {"code": "ku", "label": "Kurdish (Sorani)"}
+        ]
+    })
 
 
 @app.route("/api/overview", methods=["GET"])
