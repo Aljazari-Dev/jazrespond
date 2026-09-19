@@ -47,7 +47,6 @@ class GeminiLiveSession:
         self.voice = os.getenv("GEMINI_VOICE_NAME", "").strip()
         self.silence_ms = int(os.getenv("GEMINI_VAD_SILENCE_MS", "180"))
         self.prefix_ms = int(os.getenv("GEMINI_VAD_PREFIX_MS", "80"))
-        self.manual_vad = os.getenv("GEMINI_MANUAL_VAD", "true").strip().lower() in {"1", "true", "yes", "on"}
 
         self.language = "ar"
         self.wanted = False
@@ -59,7 +58,6 @@ class GeminiLiveSession:
         self._suppress_audio_until_turn_end = False
         self._pending_say = []
         self._ready = asyncio.Event()
-        self._manual_activity_active = False
 
     @property
     def ready(self) -> bool:
@@ -78,7 +76,6 @@ class GeminiLiveSession:
     async def stop(self) -> None:
         self.wanted = False
         self._ready.clear()
-        self._manual_activity_active = False
         task = self._task
         self._task = None
         ws = self._ws
@@ -145,35 +142,11 @@ class GeminiLiveSession:
             # than blocking the robot audio thread while the socket rotates.
             return
 
-
-    async def set_user_activity(self, active: bool) -> None:
-        """Forward bridge-side VAD boundaries to Gemini when manual VAD is enabled."""
-        active = bool(active)
-        if not self.manual_vad:
-            return
-        if self._ws is None or not self._ready.is_set() or self.manual_muted or self.paused:
-            self._manual_activity_active = False if not active else self._manual_activity_active
-            return
-        if active == self._manual_activity_active:
-            return
-        self._manual_activity_active = active
-        payload = {"realtimeInput": {"activityStart": {}}} if active else {"realtimeInput": {"activityEnd": {}}}
-        try:
-            await self._send(payload)
-        except Exception:
-            if active:
-                self._manual_activity_active = False
-
     async def audio_stream_end(self) -> None:
         if self._ws is None or not self._ready.is_set():
             return
         try:
-            if self.manual_vad:
-                if self._manual_activity_active:
-                    self._manual_activity_active = False
-                    await self._send({"realtimeInput": {"activityEnd": {}}})
-            else:
-                await self._send({"realtimeInput": {"audioStreamEnd": True}})
+            await self._send({"realtimeInput": {"audioStreamEnd": True}})
         except Exception:
             pass
 
@@ -191,14 +164,7 @@ class GeminiLiveSession:
             "following text naturally in the current language, without adding, removing, "
             "translating, explaining, or mentioning this instruction:\n" + text
         )
-        # Robot events are discrete turns. Use clientContent + turnComplete so
-        # Gemini must start generation immediately instead of waiting for VAD.
-        await self._send({
-            "clientContent": {
-                "turns": [{"role": "user", "parts": [{"text": instruction}]}],
-                "turnComplete": True,
-            }
-        })
+        await self._send({"realtimeInput": {"text": instruction}})
 
     async def _send(self, payload: dict) -> None:
         ws = self._ws
@@ -252,19 +218,18 @@ class GeminiLiveSession:
                 generation_config["speechConfig"] = {
                     "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": self.voice}}
                 }
-            realtime_input_config = {
-                "automaticActivityDetection": ({"disabled": True} if self.manual_vad else {
-                    "disabled": False,
-                    "prefixPaddingMs": self.prefix_ms,
-                    "silenceDurationMs": self.silence_ms,
-                })
-            }
             setup = {
                 "setup": {
                     "model": "models/" + self.model,
                     "generationConfig": generation_config,
                     "systemInstruction": {"parts": [{"text": instruction}]},
-                    "realtimeInputConfig": realtime_input_config,
+                    "realtimeInputConfig": {
+                        "automaticActivityDetection": {
+                            "disabled": False,
+                            "prefixPaddingMs": self.prefix_ms,
+                            "silenceDurationMs": self.silence_ms,
+                        }
+                    },
                     "inputAudioTranscription": {},
                     "outputAudioTranscription": {},
                     "tools": [{
@@ -294,7 +259,6 @@ class GeminiLiveSession:
             if "setupComplete" not in reply:
                 raise RuntimeError("Gemini setup did not complete: %s" % reply)
 
-            self._manual_activity_active = False
             self._ready.set()
             await self.on_json({
                 "type": "gemini_state",

@@ -120,8 +120,6 @@ class RobotOrchestrator:
             self.s.user_speaking = active
             if active:
                 self.s.touch()
-            if self.s.ai_enabled:
-                await self.s.gemini.set_user_activity(active)
             return
         if kind == "speaker_state":
             self.s.assistant_speaking = bool(msg.get("speaking"))
