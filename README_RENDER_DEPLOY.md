@@ -1,42 +1,61 @@
-# PromobotJazBackend Render Deployment
+# Promobot Server V4 - Render Deployment
 
-This package is prepared for GitHub + Render. Runtime JSON files are intentionally ignored.
+Server V4 keeps the existing Flask dashboard/API and mounts it inside an ASGI app so the robot can use a persistent WebSocket safely.
 
-## Render settings
+## Render
 
-Build Command:
+Build command:
+
 ```bash
 pip install -r requirements.txt
 ```
 
-Start Command:
+Start command:
+
 ```bash
-gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --worker-class gthread --timeout 120 app:app
+uvicorn asgi_app:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips='*'
 ```
 
-Health Check Path:
+Health check:
+
 ```text
 /api/health
 ```
 
-Recommended persistent disk:
+Persistent disk:
+
 ```text
-Mount path: /var/data
-Size: 1 GB
+/var/data
 ```
 
-Environment variables:
+## Required new environment variables
+
 ```text
+GEMINI_API_KEY=<secret>
+GEMINI_MODEL=gemini-3.1-flash-live-preview
+ROBOT_WS_TOKEN=<long random secret>
 DATA_DIR=/var/data
-OPENAI_API_KEY=your key
-OPENAI_MODEL=gpt-4.1-mini
-ELEVENLABS_API_KEY=your key
-ELEVENLABS_VOICE_ID_AR=9FHjCdVXgA4tYxIYHTcZ
-ELEVENLABS_MODEL_AR=eleven_flash_v2_5
-FLASK_SECRET_KEY=random secret
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=strong password
-ENABLE_ELEVENLABS_STREAMING=true
-ROBOT_AI_STREAMING_ENABLED=true
-ROBOT_STRICT_LANGUAGE_LOCK=true
+```
+
+Optional:
+
+```text
+GEMINI_VOICE_NAME=
+GEMINI_VAD_SILENCE_MS=180
+GEMINI_VAD_PREFIX_MS=80
+FACE_GREETING_IDLE_GUARD_SEC=5.0
+```
+
+Keep the existing OpenAI/ElevenLabs variables during the migration because the old AI-OFF HTTP path remains available as rollback/compatibility logic in this first server-centralization build.
+
+## Robot WebSocket
+
+```text
+wss://<render-host>/ws/robot/<robot_id>
+```
+
+Required request header:
+
+```text
+X-Robot-Token: <ROBOT_WS_TOKEN>
 ```

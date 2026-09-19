@@ -4,15 +4,19 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --worker-class gthread --timeout 120 app:app
+    startCommand: uvicorn asgi_app:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips='*' 
     healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: DATA_DIR
         value: /var/data
-      - key: OPENAI_MODEL
-        value: gpt-4.1-mini
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-live-preview
+      - key: GEMINI_VOICE_NAME
+        value: ""
+      - key: FACE_GREETING_IDLE_GUARD_SEC
+        value: "5.0"
       - key: ELEVENLABS_MODEL_AR
         value: eleven_flash_v2_5
       - key: ELEVENLABS_VOICE_ID_AR
@@ -23,6 +27,10 @@ services:
         value: true
       - key: ROBOT_STRICT_LANGUAGE_LOCK
         value: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ROBOT_WS_TOKEN
+        sync: false
       - key: FLASK_SECRET_KEY
         sync: false
       - key: ADMIN_USERNAME
