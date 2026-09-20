@@ -59,3 +59,5 @@ Required request header:
 ```text
 X-Robot-Token: <ROBOT_WS_TOKEN>
 ```
+
+GEMINI_MANUAL_VAD=true

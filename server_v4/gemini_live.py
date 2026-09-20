@@ -48,7 +48,7 @@ class GeminiLiveSession:
         self.voice = os.getenv("GEMINI_VOICE_NAME", "").strip()
         self.silence_ms = int(os.getenv("GEMINI_VAD_SILENCE_MS", "180"))
         self.prefix_ms = int(os.getenv("GEMINI_VAD_PREFIX_MS", "80"))
-        self.manual_vad = os.getenv("GEMINI_MANUAL_VAD", "false").strip().lower() in {"1", "true", "yes", "on"}
+        self.manual_vad = os.getenv("GEMINI_MANUAL_VAD", "true").strip().lower() in {"1", "true", "yes", "on"}
         self.tts_model = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview").strip()
         self.tts_voice = os.getenv("GEMINI_TTS_VOICE_NAME", self.voice or "Orus").strip()
 
@@ -405,7 +405,12 @@ class GeminiLiveSession:
                     "disabled": False,
                     "prefixPaddingMs": self.prefix_ms,
                     "silenceDurationMs": self.silence_ms,
-                })
+                }),
+                # Gemini 3.1 defaults differ from 2.5.  Explicitly keep only
+                # marked speech activity in the user's turn so room silence/noise
+                # cannot contaminate turn formation.
+                "turnCoverage": "TURN_INCLUDES_ONLY_ACTIVITY",
+                "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
             }
             setup = {
                 "setup": {
@@ -479,9 +484,17 @@ class GeminiLiveSession:
                 tx = content.get("inputTranscription") or {}
                 if tx.get("text"):
                     heard_text += tx["text"]
+                    await self.on_json({
+                        "type": "input_transcript_partial",
+                        "text": heard_text.strip(),
+                    })
                 tx = content.get("outputTranscription") or {}
                 if tx.get("text"):
                     said_text += tx["text"]
+                    await self.on_json({
+                        "type": "output_transcript_partial",
+                        "text": said_text.strip(),
+                    })
 
                 if not (self.manual_muted or self.paused or self._suppress_audio_until_turn_end):
                     for part in (content.get("modelTurn") or {}).get("parts", []):

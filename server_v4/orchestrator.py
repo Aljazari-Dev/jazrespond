@@ -122,6 +122,11 @@ class RobotOrchestrator:
                 self.s.touch()
             if self.s.ai_enabled:
                 await self.s.gemini.set_user_activity(active)
+            await self.s.send_json({
+                "type": "vad_state",
+                "active": active,
+                "mode": "manual" if self.s.gemini.manual_vad else "automatic",
+            })
             return
         if kind == "speaker_state":
             self.s.assistant_speaking = bool(msg.get("speaking"))
