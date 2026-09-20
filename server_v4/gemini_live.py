@@ -216,48 +216,126 @@ class GeminiLiveSession:
         await self.on_speaking(False)
 
     def _generate_event_tts_pcm(self, text: str) -> bytes:
+        """Generate fixed robot-event speech through the current Interactions TTS API.
+
+        Gemini 3.1 TTS can occasionally reject vague/raw transcript prompts.  The
+        request therefore uses an explicit synthesis preamble and labels the exact
+        transcript.  The current Interactions API is used instead of the legacy
+        GenerateContent path, and transient/no-audio responses are retried.
+        """
         api_key = os.getenv("GEMINI_API_KEY", "").strip()
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is not configured")
         if not self.tts_model:
             raise RuntimeError("GEMINI_TTS_MODEL is empty")
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            + self.tts_model
-            + ":generateContent?key="
-            + api_key
+
+        # Explicit wording is intentional. Gemini 3.1 TTS documents that vague
+        # prompts may fail its speech-synthesis classifier. Keep the transcript
+        # clearly separated so configured robot text stays verbatim.
+        tts_input = (
+            "Synthesize speech for the transcript below. "
+            "Speak ONLY the transcript, exactly as written. "
+            "Do not add, remove, translate, explain, or repeat anything.\n"
+            "TRANSCRIPT START\n"
+            + text
+            + "\nTRANSCRIPT END"
         )
-        generation_config = {"responseModalities": ["AUDIO"]}
-        if self.tts_voice:
-            generation_config["speechConfig"] = {
-                "voiceConfig": {
-                    "prebuiltVoiceConfig": {"voiceName": self.tts_voice}
-                }
-            }
-        payload = {
-            "contents": [{"parts": [{"text": text}]}],
-            "generationConfig": generation_config,
+
+        url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+        headers = {
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json",
+            "Api-Revision": "2026-05-20",
         }
-        response = requests.post(url, json=payload, timeout=(5, 30))
-        if response.status_code >= 400:
-            raise RuntimeError(
-                "Gemini TTS HTTP %s: %s"
-                % (response.status_code, response.text[:600])
+        speech_entry = {"voice": self.tts_voice or "Orus"}
+        payload = {
+            "model": self.tts_model,
+            "input": tts_input,
+            "response_format": {
+                "type": "audio",
+                "mime_type": "audio/l16",
+                "delivery": "inline",
+            },
+            "generation_config": {
+                "speech_config": [speech_entry]
+            },
+        }
+
+        last_error = "unknown TTS error"
+        for attempt in range(1, 4):
+            try:
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=(5, 35),
+                )
+            except Exception as exc:
+                last_error = "Gemini TTS request failed: %s" % exc
+                if attempt < 3:
+                    continue
+                raise RuntimeError(last_error)
+
+            body_preview = (response.text or "")[:1200]
+            if response.status_code >= 400:
+                last_error = "Gemini TTS HTTP %s: %s" % (
+                    response.status_code,
+                    body_preview,
+                )
+                # Retry transient service/rate-limit responses only.
+                if attempt < 3 and response.status_code in {429, 500, 502, 503, 504}:
+                    continue
+                raise RuntimeError(last_error)
+
+            try:
+                data = response.json()
+            except Exception:
+                last_error = "Gemini TTS returned invalid JSON: %s" % body_preview
+                if attempt < 3:
+                    continue
+                raise RuntimeError(last_error)
+
+            audio_blocks = []
+
+            # Current Interactions REST responses expose generated media inside
+            # model-output step content. Walk recursively as a compatibility
+            # guard in case Google adds another wrapper around audio content.
+            def collect_audio(value):
+                if isinstance(value, dict):
+                    if value.get("type") == "audio" and value.get("data"):
+                        audio_blocks.append(value)
+                    for child in value.values():
+                        collect_audio(child)
+                elif isinstance(value, list):
+                    for child in value:
+                        collect_audio(child)
+
+            collect_audio(data)
+
+            pcm_parts = []
+            for block in audio_blocks:
+                encoded = block.get("data")
+                if not encoded:
+                    continue
+                try:
+                    pcm_parts.append(base64.b64decode(encoded))
+                except Exception:
+                    continue
+
+            if pcm_parts:
+                return b"".join(pcm_parts)
+
+            status = str(data.get("status") or "")
+            last_error = (
+                "Gemini TTS returned no audio | status=%s | response=%s"
+                % (status or "unknown", json.dumps(data, ensure_ascii=False)[:1200])
             )
-        data = response.json()
-        try:
-            parts = data["candidates"][0]["content"]["parts"]
-        except Exception:
-            raise RuntimeError("Gemini TTS response has no audio candidate")
-        audio_parts = []
-        for part in parts:
-            inline = part.get("inlineData") or part.get("inline_data") or {}
-            encoded = inline.get("data")
-            if encoded:
-                audio_parts.append(base64.b64decode(encoded))
-        if not audio_parts:
-            raise RuntimeError("Gemini TTS returned no PCM audio")
-        return b"".join(audio_parts)
+            # Gemini 3.1 TTS documentation notes rare no-audio/text-token
+            # responses. Retry a clean request before surfacing the failure.
+            if attempt < 3:
+                continue
+
+        raise RuntimeError(last_error)
 
     async def _send(self, payload: dict) -> None:
         ws = self._ws
