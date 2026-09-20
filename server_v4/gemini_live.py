@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import requests
 from typing import Awaitable, Callable, Dict, Optional
 
 import websockets
@@ -47,7 +48,9 @@ class GeminiLiveSession:
         self.voice = os.getenv("GEMINI_VOICE_NAME", "").strip()
         self.silence_ms = int(os.getenv("GEMINI_VAD_SILENCE_MS", "180"))
         self.prefix_ms = int(os.getenv("GEMINI_VAD_PREFIX_MS", "80"))
-        self.manual_vad = os.getenv("GEMINI_MANUAL_VAD", "true").strip().lower() in {"1", "true", "yes", "on"}
+        self.manual_vad = os.getenv("GEMINI_MANUAL_VAD", "false").strip().lower() in {"1", "true", "yes", "on"}
+        self.tts_model = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview").strip()
+        self.tts_voice = os.getenv("GEMINI_TTS_VOICE_NAME", self.voice or "Orus").strip()
 
         self.language = "ar"
         self.wanted = False
@@ -60,6 +63,7 @@ class GeminiLiveSession:
         self._pending_say = []
         self._ready = asyncio.Event()
         self._manual_activity_active = False
+        self._tool_call_pending = False
 
     @property
     def ready(self) -> bool:
@@ -125,7 +129,7 @@ class GeminiLiveSession:
         await self.on_speaking(False)
 
     async def send_audio(self, pcm: bytes) -> None:
-        if not pcm or not self.wanted or self.manual_muted or self.paused:
+        if not pcm or not self.wanted or self.manual_muted or self.paused or self._tool_call_pending:
             return
         ws = self._ws
         if ws is None or not self._ready.is_set():
@@ -149,7 +153,7 @@ class GeminiLiveSession:
     async def set_user_activity(self, active: bool) -> None:
         """Forward bridge-side VAD boundaries to Gemini when manual VAD is enabled."""
         active = bool(active)
-        if not self.manual_vad:
+        if not self.manual_vad or self._tool_call_pending:
             return
         if self._ws is None or not self._ready.is_set() or self.manual_muted or self.paused:
             self._manual_activity_active = False if not active else self._manual_activity_active
@@ -165,7 +169,7 @@ class GeminiLiveSession:
                 self._manual_activity_active = False
 
     async def audio_stream_end(self) -> None:
-        if self._ws is None or not self._ready.is_set():
+        if self._ws is None or not self._ready.is_set() or self._tool_call_pending:
             return
         try:
             if self.manual_vad:
@@ -178,27 +182,82 @@ class GeminiLiveSession:
             pass
 
     async def speak_event(self, text: str) -> None:
+        """Speak fixed robot/app text with Gemini TTS, not the Live turn.
+
+        Fixed events (face greeting, remote reply, configured reply_text) must not
+        enter the Live conversation or its function-calling state.  Keeping them
+        on a separate TTS request prevents event speech from colliding with a
+        pending synchronous Live tool call and preserves the exact configured
+        text.
+        """
         text = (text or "").strip()
         if not text or self.manual_muted or self.paused:
             return
-        if not self._ready.is_set() or self._ws is None:
-            self._pending_say.append(text)
-            self._pending_say = self._pending_say[-10:]
+        try:
+            pcm = await asyncio.to_thread(self._generate_event_tts_pcm, text)
+        except Exception as exc:
+            await self.on_json({
+                "type": "event_tts_error",
+                "message": str(exc),
+            })
             return
-        instruction = (
-            "ROBOT_CONTROL_EVENT: This is an internal robot event, not a user utterance. "
-            "Do NOT call route_promobot_utterance for this message. Speak exactly the "
-            "following text naturally in the current language, without adding, removing, "
-            "translating, explaining, or mentioning this instruction:\n" + text
+        if not pcm or self.manual_muted or self.paused:
+            return
+        self.on_activity()
+        await self.on_speaking(True)
+        # 100 ms chunks at 24 kHz mono signed 16-bit PCM.
+        chunk_bytes = 4800
+        for pos in range(0, len(pcm), chunk_bytes):
+            if self.manual_muted or self.paused:
+                break
+            await self.on_audio(pcm[pos:pos + chunk_bytes])
+        await self.on_json({"type": "output_transcript", "text": text})
+        await self.on_json({"type": "audio_turn_end"})
+        await self.on_speaking(False)
+
+    def _generate_event_tts_pcm(self, text: str) -> bytes:
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY is not configured")
+        if not self.tts_model:
+            raise RuntimeError("GEMINI_TTS_MODEL is empty")
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            + self.tts_model
+            + ":generateContent?key="
+            + api_key
         )
-        # Robot events are discrete turns. Use clientContent + turnComplete so
-        # Gemini must start generation immediately instead of waiting for VAD.
-        await self._send({
-            "clientContent": {
-                "turns": [{"role": "user", "parts": [{"text": instruction}]}],
-                "turnComplete": True,
+        generation_config = {"responseModalities": ["AUDIO"]}
+        if self.tts_voice:
+            generation_config["speechConfig"] = {
+                "voiceConfig": {
+                    "prebuiltVoiceConfig": {"voiceName": self.tts_voice}
+                }
             }
-        })
+        payload = {
+            "contents": [{"parts": [{"text": text}]}],
+            "generationConfig": generation_config,
+        }
+        response = requests.post(url, json=payload, timeout=(5, 30))
+        if response.status_code >= 400:
+            raise RuntimeError(
+                "Gemini TTS HTTP %s: %s"
+                % (response.status_code, response.text[:600])
+            )
+        data = response.json()
+        try:
+            parts = data["candidates"][0]["content"]["parts"]
+        except Exception:
+            raise RuntimeError("Gemini TTS response has no audio candidate")
+        audio_parts = []
+        for part in parts:
+            inline = part.get("inlineData") or part.get("inline_data") or {}
+            encoded = inline.get("data")
+            if encoded:
+                audio_parts.append(base64.b64decode(encoded))
+        if not audio_parts:
+            raise RuntimeError("Gemini TTS returned no PCM audio")
+        return b"".join(audio_parts)
 
     async def _send(self, payload: dict) -> None:
         ws = self._ws
@@ -366,18 +425,29 @@ class GeminiLiveSession:
                     self._suppress_audio_until_turn_end = bool(self.manual_muted or self.paused)
 
     async def _handle_tool_call(self, tool_call: dict) -> None:
-        calls = (tool_call or {}).get("functionCalls") or []
-        responses = []
-        for call in calls:
-            call_id = call.get("id") or ""
-            name = call.get("name") or ""
-            args = call.get("args") or {}
-            if name == "route_promobot_utterance":
-                result = await self.route_command(args.get("text") or "")
-            else:
-                result = {"ok": False, "matched": False, "error": "Unknown tool: " + name}
-            item = {"name": name, "response": result}
-            if call_id:
-                item["id"] = call_id
-            responses.append(item)
-        await self._send({"toolResponse": {"functionResponses": responses}})
+        # Gemini 3.1 Live function calling is synchronous.  While a tool call is
+        # pending, do not send realtime audio/activity frames to the same Live
+        # session.  Sending realtimeInput concurrently with a pending tool call
+        # can close the Gemini socket with WebSocket 1008.
+        self._tool_call_pending = True
+        await self.on_json({"type": "tool_state", "state": "pending"})
+        try:
+            calls = (tool_call or {}).get("functionCalls") or []
+            responses = []
+            for call in calls:
+                call_id = call.get("id") or ""
+                name = call.get("name") or ""
+                args = call.get("args") or {}
+                if name == "route_promobot_utterance":
+                    result = await self.route_command(args.get("text") or "")
+                else:
+                    result = {"ok": False, "matched": False, "error": "Unknown tool: " + name}
+                item = {"name": name, "response": result}
+                if call_id:
+                    item["id"] = call_id
+                responses.append(item)
+            await self._send({"toolResponse": {"functionResponses": responses}})
+        finally:
+            self._tool_call_pending = False
+            await self.on_json({"type": "tool_state", "state": "idle"})
+
