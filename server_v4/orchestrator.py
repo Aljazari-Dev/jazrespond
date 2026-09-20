@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
+import sys
+import time
+import wave
+from array import array
+from pathlib import Path
 from typing import Any, Dict
 
 import app as legacy
@@ -15,6 +22,16 @@ class RobotOrchestrator:
     def __init__(self, session: RobotSessionState) -> None:
         self.s = session
         self.face_idle_guard_sec = float(os.getenv("FACE_GREETING_IDLE_GUARD_SEC", "5.0"))
+        self.audio_diag_enabled = os.getenv("AUDIO_DIAGNOSTICS", "false").strip().lower() in {"1", "true", "yes", "on"}
+        self.audio_diag_max_bytes = int(os.getenv("AUDIO_DIAGNOSTICS_MAX_BYTES", str(16000 * 2 * 12)))
+        data_dir = Path(os.getenv("DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))).expanduser()
+        self.audio_diag_dir = data_dir / "diagnostics"
+        self.audio_diag_buffer = bytearray()
+        self.audio_diag_frames = 0
+        self.audio_diag_started_at = 0.0
+        self.audio_diag_sum_sq = 0
+        self.audio_diag_samples = 0
+        self.audio_diag_peak = 0
         self.s.gemini = GeminiLiveSession(
             robot_id=self.s.robot_id,
             get_config=legacy.load_active_config,
@@ -52,6 +69,8 @@ class RobotOrchestrator:
     async def handle_binary(self, pcm: bytes) -> None:
         if not self.s.app_active or not self.s.ai_enabled or self.s.muted or self.s.paused:
             return
+        if self.audio_diag_enabled and self.s.user_speaking:
+            self._audio_diag_add(pcm)
         await self.s.gemini.send_audio(pcm)
 
     async def handle_json(self, msg: Dict[str, Any]) -> None:
@@ -117,6 +136,8 @@ class RobotOrchestrator:
             return
         if kind == "user_activity":
             active = bool(msg.get("active"))
+            if active and not self.s.user_speaking and self.audio_diag_enabled:
+                self._audio_diag_start()
             self.s.user_speaking = active
             if active:
                 self.s.touch()
@@ -127,6 +148,8 @@ class RobotOrchestrator:
                 "active": active,
                 "mode": "manual" if self.s.gemini.manual_vad else "automatic",
             })
+            if not active and self.audio_diag_enabled and self.audio_diag_started_at:
+                await self._audio_diag_finish()
             return
         if kind == "speaker_state":
             self.s.assistant_speaking = bool(msg.get("speaking"))
@@ -141,6 +164,78 @@ class RobotOrchestrator:
         if kind == "audio_stream_end":
             await self.s.gemini.audio_stream_end()
             return
+
+    def _audio_diag_start(self) -> None:
+        self.audio_diag_buffer = bytearray()
+        self.audio_diag_frames = 0
+        self.audio_diag_started_at = time.monotonic()
+        self.audio_diag_sum_sq = 0
+        self.audio_diag_samples = 0
+        self.audio_diag_peak = 0
+        legacy.log_event("audio_debug", "PCM capture started", {"robot_id": self.s.robot_id})
+
+    def _audio_diag_add(self, pcm: bytes) -> None:
+        if not pcm or not self.audio_diag_started_at:
+            return
+        remaining = max(0, self.audio_diag_max_bytes - len(self.audio_diag_buffer))
+        if remaining:
+            self.audio_diag_buffer.extend(pcm[:remaining])
+        self.audio_diag_frames += 1
+        usable = len(pcm) - (len(pcm) % 2)
+        if usable <= 0:
+            return
+        samples = array("h")
+        samples.frombytes(pcm[:usable])
+        if sys.byteorder != "little":
+            samples.byteswap()
+        for sample in samples:
+            value = int(sample)
+            absolute = -value if value < 0 else value
+            if absolute > self.audio_diag_peak:
+                self.audio_diag_peak = absolute
+            self.audio_diag_sum_sq += value * value
+        self.audio_diag_samples += len(samples)
+
+    def _audio_diag_paths(self):
+        safe_robot = re.sub(r"[^A-Za-z0-9_.-]+", "_", self.s.robot_id or "robot")
+        self.audio_diag_dir.mkdir(parents=True, exist_ok=True)
+        return (
+            self.audio_diag_dir / (safe_robot + "_latest.wav"),
+            self.audio_diag_dir / (safe_robot + "_latest.json"),
+        )
+
+    async def _audio_diag_finish(self) -> None:
+        started = self.audio_diag_started_at
+        self.audio_diag_started_at = 0.0
+        pcm = bytes(self.audio_diag_buffer)
+        self.audio_diag_buffer = bytearray()
+        duration_ms = int((len(pcm) / float(16000 * 2)) * 1000.0) if pcm else 0
+        rms = int((self.audio_diag_sum_sq / float(self.audio_diag_samples)) ** 0.5) if self.audio_diag_samples else 0
+        peak = int(self.audio_diag_peak)
+        frames = int(self.audio_diag_frames)
+        wav_path, meta_path = self._audio_diag_paths()
+        if pcm:
+            with wave.open(str(wav_path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(16000)
+                wav_file.writeframes(pcm)
+        metadata = {
+            "robot_id": self.s.robot_id,
+            "bytes": len(pcm),
+            "frames": frames,
+            "duration_ms": duration_ms,
+            "rms": rms,
+            "peak": peak,
+            "truncated": len(pcm) >= self.audio_diag_max_bytes,
+            "wav_file": wav_path.name if pcm else "",
+        }
+        try:
+            meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        legacy.log_event("audio_debug", "PCM capture finished", metadata)
+        await self.s.send_json({"type": "audio_debug_turn", **metadata})
 
     async def _set_mode(self, enabled: bool, language: Any = None) -> None:
         if language:

@@ -3,8 +3,12 @@ from __future__ import annotations
 import os
 from hmac import compare_digest
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from starlette.middleware.wsgi import WSGIMiddleware
+from starlette.responses import FileResponse, JSONResponse
+from pathlib import Path
+import json
+import re
 
 from app import app as flask_app
 from server_v4.orchestrator import RobotOrchestrator
@@ -55,6 +59,40 @@ async def robot_websocket(websocket: WebSocket, robot_id: str):
     finally:
         await orchestrator.close()
         await registry.remove(robot_id, session)
+
+
+def _require_robot_token(token: str) -> None:
+    expected = os.getenv("ROBOT_WS_TOKEN", "").strip()
+    if not expected or not token or not compare_digest(expected, token.strip()):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _diag_paths(robot_id: str):
+    safe_robot = re.sub(r"[^A-Za-z0-9_.-]+", "_", robot_id or "robot")
+    data_dir = Path(os.getenv("DATA_DIR", str(Path(__file__).resolve().parent / "data"))).expanduser()
+    diag_dir = data_dir / "diagnostics"
+    return diag_dir / (safe_robot + "_latest.wav"), diag_dir / (safe_robot + "_latest.json")
+
+
+@app.get("/api/v4/debug/audio/{robot_id}/latest.wav")
+async def debug_latest_audio(robot_id: str, x_robot_token: str = Header(default="")):
+    _require_robot_token(x_robot_token)
+    wav_path, _ = _diag_paths(robot_id)
+    if not wav_path.exists():
+        raise HTTPException(status_code=404, detail="No captured audio for robot")
+    return FileResponse(str(wav_path), media_type="audio/wav", filename=wav_path.name)
+
+
+@app.get("/api/v4/debug/audio/{robot_id}/latest.json")
+async def debug_latest_audio_meta(robot_id: str, x_robot_token: str = Header(default="")):
+    _require_robot_token(x_robot_token)
+    _, meta_path = _diag_paths(robot_id)
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="No captured audio metadata for robot")
+    try:
+        return JSONResponse(json.loads(meta_path.read_text(encoding="utf-8")))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Invalid diagnostic metadata: %s" % exc)
 
 
 # Keep the existing Flask dashboard and HTTP APIs unchanged while the new
