@@ -252,9 +252,7 @@ class GeminiLiveSession:
             "model": self.tts_model,
             "input": tts_input,
             "response_format": {
-                "type": "audio",
-                "mime_type": "audio/l16",
-                "delivery": "inline",
+                "type": "audio"
             },
             "generation_config": {
                 "speech_config": [speech_entry]
@@ -295,9 +293,22 @@ class GeminiLiveSession:
                     continue
                 raise RuntimeError(last_error)
 
+            # Current Interactions API exposes the convenience audio block at
+            # top-level `output_audio`. Prefer that exact documented shape.
+            output_audio = data.get("output_audio") or data.get("outputAudio") or {}
+            encoded = output_audio.get("data") if isinstance(output_audio, dict) else None
+            if encoded:
+                try:
+                    pcm = base64.b64decode(encoded)
+                    if pcm:
+                        return pcm
+                except Exception:
+                    pass
+
             audio_blocks = []
 
-            # Current Interactions REST responses expose generated media inside
+            # Compatibility fallback: walk the response recursively in case
+            # Google wraps the audio block differently in a future revision.
             # model-output step content. Walk recursively as a compatibility
             # guard in case Google adds another wrapper around audio content.
             def collect_audio(value):
