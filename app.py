@@ -106,7 +106,7 @@ LOG_EVENTS = []
 LOG_LOCK = threading.Lock()
 ROBOT_HEARTBEATS = {}
 ROBOT_HEARTBEATS_LOCK = threading.Lock()
-SERVER_MODE = "direct_gemini_v3_1"
+SERVER_MODE = "direct_gemini_v3_2"
 
 DEFAULT_COMMANDS = [
     {
@@ -1554,6 +1554,8 @@ def api_robot_gemini_config():
         "quick_answer_prompt": config.get("quick_answer_prompt", ""),
         "detail_answer_prompt": config.get("detail_answer_prompt", ""),
         "knowledge_base": config.get("knowledge_base", ""),
+        "commands": commands,
+        "face_greetings": face_greetings,
         "supported_languages": ["ar", "en", "ku"],
         "routing": {
             "commands_match_endpoint": "/api/commands/match",

@@ -1,0 +1,7 @@
+Promobot Render Backend V3.2 FINAL TEST CANDIDATE
+
+Changes from V3.1:
+- server_mode = direct_gemini_v3_2
+- /api/robot/gemini-config now returns the ACTIVE commands and ACTIVE face greetings together with prompt/KB.
+- This lets Node V2.17 cache the exact synced server command set locally for fast voice-command execution while Render remains the source of truth.
+- Existing persistence, dashboard, heartbeat/status, remote, command match and face greeting APIs are unchanged.
