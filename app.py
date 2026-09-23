@@ -104,6 +104,9 @@ LIVE_AUDIO_JOBS = {}
 LIVE_AUDIO_JOBS_LOCK = threading.Lock()
 LOG_EVENTS = []
 LOG_LOCK = threading.Lock()
+ROBOT_HEARTBEATS = {}
+ROBOT_HEARTBEATS_LOCK = threading.Lock()
+SERVER_MODE = "direct_gemini_v3_1"
 
 DEFAULT_COMMANDS = [
     {
@@ -365,6 +368,8 @@ PUBLIC_PATH_PREFIXES = (
     "/api/face-greetings/match",
     "/api/robot/runtime-config",
     "/api/robot/gemini-config",
+    "/api/robot/heartbeat",
+    "/api/robot/status",
     "/api/robot/sync/apply",
     "/api/audio/live/",
     "/audio/",
@@ -1544,6 +1549,7 @@ def api_robot_gemini_config():
 
     return jsonify({
         "ok": True,
+        "server_mode": SERVER_MODE,
         "system_prompt": config.get("system_prompt", ""),
         "quick_answer_prompt": config.get("quick_answer_prompt", ""),
         "detail_answer_prompt": config.get("detail_answer_prompt", ""),
@@ -1583,9 +1589,57 @@ def api_robot_sync_apply():
     })
 
 
+def _robot_config_token_authorized():
+    expected = os.getenv("ROBOT_CONFIG_TOKEN", "").strip()
+    provided = request.headers.get("X-Robot-Token", "").strip()
+    return bool(expected and provided and compare_digest(provided, expected))
+
+
+@app.route("/api/robot/heartbeat", methods=["POST"])
+def api_robot_heartbeat():
+    if not _robot_config_token_authorized():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    robot_id = str(data.get("robot_id") or "promobot_v4_0445").strip()
+    item = {
+        "robot_id": robot_id,
+        "language": str(data.get("language") or ""),
+        "ai_mode": str(data.get("ai_mode") or ""),
+        "gemini_status": str(data.get("gemini_status") or ""),
+        "model": str(data.get("model") or ""),
+        "node_version": str(data.get("node_version") or ""),
+        "last_seen_unix": time.time(),
+    }
+    with ROBOT_HEARTBEATS_LOCK:
+        ROBOT_HEARTBEATS[robot_id] = item
+    return jsonify({"ok": True, "server_mode": SERVER_MODE, "heartbeat_sec": 20})
+
+
+@app.route("/api/robot/status", methods=["GET"])
+def api_robot_status():
+    if not _robot_config_token_authorized():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    robot_id = request.args.get("robot_id", "promobot_v4_0445").strip()
+    with ROBOT_HEARTBEATS_LOCK:
+        item = dict(ROBOT_HEARTBEATS.get(robot_id) or {})
+    if not item:
+        return jsonify({"ok": True, "robot_id": robot_id, "online": False, "server_mode": SERVER_MODE})
+    age = max(0.0, time.time() - float(item.get("last_seen_unix") or 0.0))
+    item["age_sec"] = round(age, 1)
+    item["online"] = age <= 45.0
+    item["server_mode"] = SERVER_MODE
+    return jsonify({"ok": True, "robot": item})
+
+
 @app.route("/api/health", methods=["GET"])
 def health():
-    return jsonify({"ok": True, "server": "online", "robot": "unknown", "message": "Promobot backend is running"})
+    return jsonify({
+        "ok": True,
+        "server": "online",
+        "server_mode": SERVER_MODE,
+        "robot": "unknown",
+        "message": "Promobot direct-Gemini backend is running"
+    })
 
 
 @app.route("/api/languages", methods=["GET"])

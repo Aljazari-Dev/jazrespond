@@ -1,63 +1,34 @@
-# Promobot Server V4 - Render Deployment
+# Promobot Direct Gemini Render Deployment
 
-Server V4 keeps the existing Flask dashboard/API and mounts it inside an ASGI app so the robot can use a persistent WebSocket safely.
+This package restores the Flask backend used by the proven direct Gemini ROS node. Gemini audio does **not** pass through Render.
 
-## Render
+## Render settings
 
-Build command:
-
+Build Command:
 ```bash
 pip install -r requirements.txt
 ```
 
-Start command:
-
+Start Command:
 ```bash
-uvicorn asgi_app:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips='*'
+gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 8 --worker-class gthread --timeout 120 --keep-alive 15 app:app
 ```
 
-Health check:
+Health Check Path: `/api/health`
 
+Persistent disk: `/var/data` (1 GB is sufficient for current JSON/runtime data).
+
+Required/important environment:
 ```text
-/api/health
-```
-
-Persistent disk:
-
-```text
-/var/data
-```
-
-## Required new environment variables
-
-```text
-GEMINI_API_KEY=<secret>
-GEMINI_MODEL=gemini-3.1-flash-live-preview
-ROBOT_WS_TOKEN=<long random secret>
 DATA_DIR=/var/data
+IMPORT_SEED_JSON=false
+SEED_JSON_OVERWRITE=false
+ROBOT_CONFIG_TOKEN=<same value used by PROMOBOT_PROMPT_TOKEN on robot>
+FLASK_SECRET_KEY=<secret>
+ADMIN_USERNAME=<dashboard user>
+ADMIN_PASSWORD=<dashboard password>
 ```
 
-Optional:
+Keep existing OpenAI/ElevenLabs variables only if AI-OFF `/api/chat` still uses those providers.
 
-```text
-GEMINI_VOICE_NAME=
-GEMINI_VAD_SILENCE_MS=180
-GEMINI_VAD_PREFIX_MS=80
-FACE_GREETING_IDLE_GUARD_SEC=5.0
-```
-
-Keep the existing OpenAI/ElevenLabs variables during the migration because the old AI-OFF HTTP path remains available as rollback/compatibility logic in this first server-centralization build.
-
-## Robot WebSocket
-
-```text
-wss://<render-host>/ws/robot/<robot_id>
-```
-
-Required request header:
-
-```text
-X-Robot-Token: <ROBOT_WS_TOKEN>
-```
-
-GEMINI_MANUAL_VAD=true
+Remove experimental bridge-only variables after rollback: `ROBOT_WS_TOKEN`, `AUDIO_DIAGNOSTICS`, `GEMINI_MANUAL_VAD`, `GEMINI_TTS_MODEL`, `GEMINI_TTS_VOICE_NAME`.
