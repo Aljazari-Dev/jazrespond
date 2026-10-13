@@ -3,27 +3,53 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <h1>System Prompt</h1>
-    <p>Robot response behavior and answer structure.</p>
+    <h1>Prompt Engine</h1>
+    <p>Professional Local / Event prompt architecture. Only one mode is active.</p>
   </div>
   <div class="head-actions">
+    <span class="mode-badge" id="activeModeBadge">{{ (config.active_mode or 'local')|upper }} active</span>
     <button class="btn" onclick="resetPromptForm()">Reset</button>
     <button class="btn primary" onclick="savePrompt()">Save Prompt</button>
   </div>
 </section>
 
-<section class="panel prompt-panel">
-  <form id="promptForm" class="form-body">
-    <label>System Prompt
-      <textarea name="system_prompt" class="large-textarea">{{ config.system_prompt }}</textarea>
-    </label>
-    <label>Quick Answer Prompt
-      <textarea name="quick_answer_prompt" class="large-textarea mid">{{ config.quick_answer_prompt }}</textarea>
-    </label>
-    <label>Detail Answer Prompt
-      <textarea name="detail_answer_prompt" class="large-textarea mid">{{ config.detail_answer_prompt }}</textarea>
-    </label>
-  </form>
+<section class="panel prompt-panel" id="promptModeRoot" data-active-mode="{{ config.active_mode or 'local' }}">
+  <div class="form-body">
+    <div class="shared-box"><b>Shared in both modes:</b> Winno identity and hard rules, Aljazari brand/accuracy/privacy policy, the Aljazari robot directory, and the official Aljazari AI Solutions knowledge. These are injected automatically so Local and Event prompts stay clean and do not duplicate instructions.</div>
+    <div class="mode-switch">
+      <button type="button" class="mode-btn" id="localModeBtn" onclick="selectPromptMode('local')">Local</button>
+      <button type="button" class="mode-btn" id="eventModeBtn" onclick="selectPromptMode('event')">Event</button>
+      <button type="button" class="btn" onclick="activatePromptMode()">Activate selected mode</button>
+    </div>
+
+    <form id="promptForm">
+      <div class="mode-pane" id="localPromptPane">
+        <label>Local System Prompt
+          <textarea name="local_system_prompt" class="large-textarea">{{ config.local_system_prompt }}</textarea>
+        </label>
+        <label>Local Knowledge
+          <textarea name="local_knowledge_prompt" class="large-textarea">{{ config.local_knowledge_prompt }}</textarea>
+        </label>
+      </div>
+
+      <div class="mode-pane" id="eventPromptPane">
+        <label>Event System Prompt
+          <textarea name="event_system_prompt" class="large-textarea">{{ config.event_system_prompt }}</textarea>
+        </label>
+        <label>Event Knowledge
+          <textarea name="event_knowledge_prompt" class="large-textarea">{{ config.event_knowledge_prompt }}</textarea>
+        </label>
+      </div>
+
+      <div class="panel-head" style="margin:22px -22px 18px"><h2>Common response structure</h2></div>
+      <label>Quick Answer Prompt
+        <textarea name="quick_answer_prompt" class="large-textarea mid">{{ config.quick_answer_prompt }}</textarea>
+      </label>
+      <label>Detail Answer Prompt
+        <textarea name="detail_answer_prompt" class="large-textarea mid">{{ config.detail_answer_prompt }}</textarea>
+      </label>
+    </form>
+  </div>
 </section>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script>{% endblock %}

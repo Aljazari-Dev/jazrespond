@@ -142,6 +142,31 @@ async function savePrompt() {
   toast(j.message || 'Saved');
 }
 
+let selectedPromptMode = null;
+function renderPromptMode() {
+  const root = document.getElementById('promptModeRoot');
+  if (!root) return;
+  const active = root.dataset.activeMode === 'event' ? 'event' : 'local';
+  if (!selectedPromptMode) selectedPromptMode = active;
+  document.getElementById('localPromptPane')?.classList.toggle('active', selectedPromptMode === 'local');
+  document.getElementById('eventPromptPane')?.classList.toggle('active', selectedPromptMode === 'event');
+  document.getElementById('localModeBtn')?.classList.toggle('active', selectedPromptMode === 'local');
+  document.getElementById('eventModeBtn')?.classList.toggle('active', selectedPromptMode === 'event');
+  const badge = document.getElementById('activeModeBadge');
+  if (badge) badge.textContent = active.toUpperCase() + ' active';
+}
+function selectPromptMode(mode) { selectedPromptMode = mode === 'event' ? 'event' : 'local'; renderPromptMode(); }
+async function activatePromptMode() {
+  await savePrompt();
+  const r = await fetch('/prompt/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mode:selectedPromptMode})});
+  const j = await r.json();
+  if (!j.ok) return toast(j.message || 'Mode activation failed');
+  const root = document.getElementById('promptModeRoot');
+  if (root) root.dataset.activeMode = j.active_mode;
+  renderPromptMode();
+  toast(j.message || 'Mode activated');
+}
+
 function resetPromptForm() {
   window.location.reload();
 }
@@ -627,4 +652,5 @@ document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('commandsTable')) initCommandPage();
   if (document.getElementById('usageBody')) loadUsage();
   if (document.getElementById('logsBody')) loadLogs();
+  if (document.getElementById('promptModeRoot')) renderPromptMode();
 });
